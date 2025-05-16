@@ -16,7 +16,18 @@ const PORTS = [8000, 8080, 3000, 5000];
 let currentPortIndex = 0;
 
 // Use MongoDB Atlas connection with database name
-const MONGOURL = process.env.MONGO_URI;
+const MONGOURL =
+  process.env.MONGO_URI ||
+  "mongodb+srv://maykellsilva070:cva8l4Pj9am0YYL3@users.blztuf9.mongodb.net/jmj-events";
+
+console.log("MongoDB Connection: Attempting to connect to MongoDB Atlas");
+console.log("MongoDB URI:", MONGOURL);
+console.log(
+  "NOTE: You need to whitelist your IP in MongoDB Atlas for this connection to work"
+);
+console.log(
+  "Visit: https://cloud.mongodb.com > Network Access > Add IP Address > Add Current IP Address"
+);
 
 // Handle ES module __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -29,6 +40,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 app.get("/", (req, res) => {
+  console.log("Homepage requested");
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
@@ -40,15 +52,23 @@ const startServer = (port) => {
   const server = app
     .listen(port)
     .on("listening", () => {
+      console.log(`Server running on http://localhost:${port}`);
       // Update the port in form-submit.js to match the actual port
       updateFormSubmitPort(port);
     })
     .on("error", (err) => {
       if (err.code === "EADDRINUSE") {
+        console.log(`Port ${port} is busy, trying next port...`);
         currentPortIndex++;
         if (currentPortIndex < PORTS.length) {
           startServer(PORTS[currentPortIndex]);
+        } else {
+          console.error(
+            "All ports are busy. Please free up a port or specify a different one."
+          );
         }
+      } else {
+        console.error("Server error:", err);
       }
     });
   return server;
@@ -61,6 +81,7 @@ const updateFormSubmitPort = (port) => {
 
     fs.readFile(formSubmitFile, "utf8", (err, data) => {
       if (err) {
+        console.error("Error reading form-submit.js:", err);
         return;
       }
 
@@ -70,9 +91,17 @@ const updateFormSubmitPort = (port) => {
         `fetch("http://localhost:${port}/register"`
       );
 
-      fs.writeFile(formSubmitFile, updatedData, "utf8", (err) => {});
+      fs.writeFile(formSubmitFile, updatedData, "utf8", (err) => {
+        if (err) {
+          console.error("Error updating form-submit.js:", err);
+        } else {
+          console.log(`Updated form-submit.js to use port ${port}`);
+        }
+      });
     });
-  } catch (error) {}
+  } catch (error) {
+    console.error("Error updating port in form-submit.js:", error);
+  }
 };
 
 // MongoDB connect with timeout and options
@@ -82,12 +111,15 @@ mongoose
     socketTimeoutMS: 45000, // Close sockets after 45s of inactivity
   })
   .then(() => {
+    console.log("✅ Connected to MongoDB Atlas");
     // Start server with the first port
     startServer(PORTS[currentPortIndex]);
   })
   .catch((error) => {
+    console.error("MongoDB connection error:", error);
     // Start the server even if MongoDB connection fails, for testing the frontend
     startServer(PORTS[currentPortIndex]);
+    console.log(`⚠️ Form submissions will be stored in memory temporarily`);
   });
 
 // Schema
@@ -107,6 +139,8 @@ const Event = mongoose.model("Event", eventSchema);
 // Register route
 app.post("/register", async (req, res) => {
   try {
+    console.log("Received form data:", req.body);
+
     const {
       firstName,
       lastName,
@@ -119,6 +153,7 @@ app.post("/register", async (req, res) => {
     } = req.body;
 
     if (!firstName || !lastName || !email || !eventDate || !guestCount) {
+      console.log("Missing required fields in registration");
       return res.status(400).json({ message: "Missing required fields" });
     }
 
@@ -137,8 +172,10 @@ app.post("/register", async (req, res) => {
     // Check if MongoDB is connected
     if (mongoose.connection.readyState === 1) {
       // Connected to MongoDB
+      console.log("Saving event to MongoDB database");
       const eventDoc = new Event(newEvent);
       await eventDoc.save();
+      console.log("Event saved successfully, ID:", eventDoc._id);
       res.status(201).json({
         success: true,
         message: "Event registration successful!",
@@ -146,6 +183,7 @@ app.post("/register", async (req, res) => {
       });
     } else {
       // Not connected, save in memory
+      console.log("MongoDB not connected, storing event in memory");
       formSubmissions.push(newEvent);
       res.status(201).json({
         success: true,
